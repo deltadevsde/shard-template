@@ -1,6 +1,7 @@
 use crate::tx::Transaction;
 use anyhow::Result;
 
+#[derive(Default)]
 pub struct State {}
 
 impl State {

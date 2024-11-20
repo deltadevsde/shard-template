@@ -139,8 +139,8 @@ impl Node {
             }
         }
 
-        let _ = self.genesis_sync_completed.notify_one();
         info!("historical sync completed");
+        self.genesis_sync_completed.notify_one();
 
         Ok(())
     }
