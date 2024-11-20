@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use celestia_types::nmt::Namespace;
 use clap::{Parser, Subcommand};
+use prism_common::keys::Signature;
 use std::sync::Arc;
 use std::time::Duration;
-use tx::Transaction;
+use tx::{Transaction, TransactionType, SIGNATURE_VERIFICATION_ENABLED};
 
 mod node;
 mod state;
@@ -52,7 +53,16 @@ enum Command {
 #[derive(Parser, Debug)]
 struct SubmitTxArgs {
     #[command(subcommand)]
-    tx: Transaction,
+    tx: TransactionType,
+
+    #[command(flatten)]
+    common: CommonArgs,
+}
+
+#[derive(Parser, Debug)]
+struct CreateSignerArgs {
+    /// The name of the key to create (used for signing transactions)
+    key_name: String,
 
     #[command(flatten)]
     common: CommonArgs,
@@ -106,14 +116,25 @@ async fn start_node(config: Config) -> Result<()> {
     Ok(())
 }
 
-async fn submit_tx(config: Config, tx: Transaction) -> Result<()> {
+async fn submit_tx(config: Config, tx_variant: TransactionType) -> Result<()> {
     let url = format!("http://{}/submit_tx", config.listen_addr);
+
+    let tx = if SIGNATURE_VERIFICATION_ENABLED {
+        panic!("not yet implemented")
+    } else {
+        Transaction {
+            signature: Signature::default(),
+            nonce: 0,
+            vk: keystore_rs::create_signing_key().verification_key().into(),
+            tx_type: tx_variant,
+        }
+    };
 
     let client = reqwest::Client::new();
     let response = client.post(url).json(&tx).send().await?;
 
     if response.status().is_success() {
-        println!("Transaction submitted successfully");
+        info!("Transaction submitted successfully");
         Ok(())
     } else {
         Err(anyhow::anyhow!(
