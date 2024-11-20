@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use celestia_types::nmt::Namespace;
 use clap::{Parser, Subcommand};
-use prism_common::keys::Signature;
+use prism_common::keys::{Signature, VerifyingKey};
 use std::sync::Arc;
 use std::time::Duration;
 use tx::{Transaction, TransactionType, SIGNATURE_VERIFICATION_ENABLED};
@@ -125,13 +125,13 @@ async fn submit_tx(config: Config, tx_variant: TransactionType) -> Result<()> {
         Transaction {
             signature: Signature::default(),
             nonce: 0,
-            vk: keystore_rs::create_signing_key().verification_key().into(),
+            vk: VerifyingKey::Ed25519([0; 32]),
             tx_type: tx_variant,
         }
     };
 
     let client = reqwest::Client::new();
-    let response = client.post(url).json(&tx).send().await?;
+    let response = client.post(url).json(&tx_variant).send().await?;
 
     if response.status().is_success() {
         info!("Transaction submitted successfully");
