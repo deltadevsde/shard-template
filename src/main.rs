@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use celestia_types::nmt::Namespace;
 use clap::{Parser, Subcommand};
+use keystore_rs::KeyStore;
 use prism_common::keys::{Signature, VerifyingKey};
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,12 +49,20 @@ enum Command {
     Serve(CommonArgs),
     /// Submit a transaction
     SubmitTx(SubmitTxArgs),
+    /// Create a signer
+    CreateSigner(CreateSignerArgs),
 }
 
 #[derive(Parser, Debug)]
 struct SubmitTxArgs {
     #[command(subcommand)]
     tx: TransactionType,
+
+    #[arg(long, default_value = "default")]
+    key_name: String,
+
+    #[arg(long, default_value = "0")]
+    nonce: u64,
 
     #[command(flatten)]
     common: CommonArgs,
@@ -63,9 +72,6 @@ struct SubmitTxArgs {
 struct CreateSignerArgs {
     /// The name of the key to create (used for signing transactions)
     key_name: String,
-
-    #[command(flatten)]
-    common: CommonArgs,
 }
 
 #[derive(Parser, Debug)]
@@ -86,11 +92,26 @@ async fn main() -> Result<()> {
             let config = config_from_args(common_args)?;
             start_node(config).await
         }
-        Command::SubmitTx(SubmitTxArgs { common, tx }) => {
+        Command::SubmitTx(SubmitTxArgs {
+            common,
+            key_name,
+            nonce,
+            tx,
+        }) => {
             let config = config_from_args(common)?;
-            submit_tx(config, tx).await
+            submit_tx(config, key_name, nonce, tx).await
         }
+        Command::CreateSigner(CreateSignerArgs { key_name }) => create_signer(key_name),
     }
+}
+
+fn create_signer(key_name: String) -> Result<()> {
+    let signer = keystore_rs::create_signing_key();
+    keystore_rs::KeyChain
+        .add_signing_key(key_name.as_str(), &signer)
+        .map_err(|e| anyhow::anyhow!("Failed to create signer: {}", e))?;
+    info!("Signer '{}' created successfully", key_name);
+    Ok(())
 }
 
 fn config_from_args(args: CommonArgs) -> Result<Config> {
@@ -116,22 +137,40 @@ async fn start_node(config: Config) -> Result<()> {
     Ok(())
 }
 
-async fn submit_tx(config: Config, tx_variant: TransactionType) -> Result<()> {
+async fn submit_tx(
+    config: Config,
+    key_name: String,
+    nonce: u64,
+    tx_variant: TransactionType,
+) -> Result<()> {
     let url = format!("http://{}/submit_tx", config.listen_addr);
 
     let tx = if SIGNATURE_VERIFICATION_ENABLED {
-        panic!("not yet implemented")
+        let signer = keystore_rs::KeyChain
+            .get_signing_key(key_name.as_str())
+            .unwrap();
+        let vk: VerifyingKey = signer.clone().into();
+        let mut tx = Transaction {
+            signature: Signature::default(),
+            nonce,
+            vk,
+            tx_type: tx_variant,
+        };
+
+        // TODO: ugly api
+        tx.sign(&prism_common::keys::SigningKey::Ed25519(Box::new(signer)))?;
+        tx
     } else {
         Transaction {
             signature: Signature::default(),
             nonce: 0,
-            vk: VerifyingKey::Ed25519([0; 32]),
+            vk: VerifyingKey::Ed25519(keystore_rs::create_signing_key().verification_key()),
             tx_type: tx_variant,
         }
     };
 
     let client = reqwest::Client::new();
-    let response = client.post(url).json(&tx_variant).send().await?;
+    let response = client.post(url).json(&tx).send().await?;
 
     if response.status().is_success() {
         info!("Transaction submitted successfully");

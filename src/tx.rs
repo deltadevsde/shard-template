@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use celestia_types::Blob;
 use clap::Subcommand;
-use prism_common::keys::{Signature, VerifyingKey};
+use prism_common::keys::{Signature, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 /// If true, the system will verify signatures on transactions. If false,
@@ -35,13 +35,26 @@ pub struct Transaction {
 impl Transaction {
     pub fn verify(&self) -> Result<()> {
         if SIGNATURE_VERIFICATION_ENABLED {
-            let msg = bincode::serialize(&(self.tx_type.clone(), self.nonce))?;
-            self.vk.verify_signature(&msg, &self.signature)?;
+            self.vk
+                .verify_signature(&self.signature_msg()?, &self.signature)?;
         }
 
         match self.tx_type {
             TransactionType::Noop => Ok(()),
         }
+    }
+
+    pub fn sign(&mut self, key: &SigningKey) -> Result<()> {
+        if SIGNATURE_VERIFICATION_ENABLED {
+            let msg = self.signature_msg()?;
+            self.signature = key.sign(&msg);
+            return Ok(());
+        }
+        Err(anyhow!("Signature verification is disabled"))
+    }
+
+    fn signature_msg(&self) -> Result<Vec<u8>> {
+        bincode::serialize(&(self.tx_type.clone(), self.nonce)).map_err(|e| anyhow!(e))
     }
 }
 
